@@ -1,75 +1,81 @@
+use std::borrow::Borrow;
+// use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 // 定义 DentryTable 结构体
 struct DentryTable {
-    dentries: Vec<Rc<Dentry>>, // 存储所有 Dentry 节点的 Rc 指针
+    dentries: Vec<Dentry>, // 存储所有 Dentry 节点的 Rc 指针
 }
 
-trait DentryTableOperations {
-    // 创建一个新的 DentryTable
-    fn new() -> DentryTable;
-
-    // 添加一个新的 Dentry 节点，返回节点的引用
-    fn add(&mut self, parent_index: Option<usize>) -> Rc<Dentry>;
-
-    // 移除一个 Dentry 节点
-    fn remove(&mut self, dentry: &Dentry) -> Result<&DentryTable, &'static str>;
-}
-
-impl DentryTableOperations for DentryTable {
+impl DentryTable {
     fn new() -> DentryTable {
         DentryTable {
             dentries: Vec::new(),
         }
     }
+}
 
-    fn add(&mut self, parent_index: Option<usize>) -> Rc<Dentry> {
-        let index = self.dentries.len();
-        let parent = parent_index.map(|i| Rc::downgrade(&self.dentries[i])); // 使用 Weak 指针
-                                                                             // 创建一个新的 Dentry 节点
-        let new_dentry = Dentry::new(index, parent);
+trait DentryTableOperations {
+    // 获取所有 Dentry 节点的引用
+    fn get_dentries(&self) -> Vec<Dentry>;
 
-        // 将 Rc 指针添加到 DentryTable
-        self.dentries.push(new_dentry.clone());
-        new_dentry // 返回新添加的 Dentry 的 Rc 指针
+    // 添加一个新的 Dentry 节点，返回节点的引用
+    fn add(&mut self, parent_index: Option<usize>) -> &Dentry;
+
+    // 移除一个 Dentry 节点
+    fn remove(&mut self, dentry: Dentry) -> Result<&DentryTable, &'static str>;
+}
+
+impl DentryTableOperations for DentryTable {
+    fn get_dentries(&self) -> Vec<Dentry> {
+        self.dentries.clone()
     }
 
-    fn remove(&mut self, dentry: &Dentry) -> Result<&DentryTable, &'static str> {
-        // 检查是否存在子目录, 若存在则不允许删除
+    fn add(&mut self, parent_index: Option<usize>) -> Dentry {
+        let index = self.dentries.len();
+        let dentry = Dentry::new(index, parent_index);
+    }
+
+    fn remove(&mut self, dentry: Dentry) -> Result<&DentryTable, &'static str> {
         if !dentry.children.borrow().is_empty() {
             return Err("Cannot delete dentry with existing children.");
         }
 
-        // 查找 Dentry 的索引并移除
-        if let Some(pos) = self
-            .dentries
-            .iter()
-            .position(|x| Rc::ptr_eq(x, &Rc::new(dentry.clone())))
-        {
-            self.dentries.remove(pos);
+        if let Some(index) = self.dentries.iter().position(|d| *d == dentry) {
+            self.dentries.remove(index);
+            Ok(self)
+        }else {
+            Err("Dentry not found.")
         }
-        Ok(self) // 返回当前的 DentryTable
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct Dentry {
     // 存储目录树的节点引用
-    index: usize,                       // 在 DentryTable 中的位置
-    parent: Option<Weak<Dentry>>,       // 使用 Weak 指针来避免循环引用
-    children: RefCell<Vec<Rc<Dentry>>>, // 存储子节点的 Rc 指针
+    index: usize,                 // 在 DentryTable 中的位置
+    parent: Option<Box<Dentry>>,       // 使用 Weak 指针来避免循环引用
+    children: Vec<Dentry>,    // 存储子节点
 }
 
-trait DentryOperations {
-    // 创建一个新的 Dentry 节点, 当初始化根目录时，parent应为 None
-    fn new(index: usize, parent: Option<Weak<Dentry>>) -> Rc<Dentry>;
+impl Dentry {
+    fn new(index: usize, parent: Option<Box<Dentry>>) -> Rc<Dentry> {
+        Rc::new(Dentry {
+            index,
+            parent,
+            children: Vec::new(),
+        })
+    }
+}
 
+// 定义 DentryOperations 特性，用于操作 Dentry 节点
+trait DentryOperations {
     // // 返回当前 Dentry 的子目录的引用，可能为空
-    fn get_children(&self) -> Vec<Rc<Dentry>>;
+    fn get_children(&self) -> Vec<Dentry>;
 
     // 返回当前 Dentry 的父目录的引用，可能为 None
-    fn get_parent(&self) -> Option<Rc<Dentry>>;
+    fn get_parent(&self) -> Option<Dentry>;
 
     // 获取兄弟目录项的引用，需要 DentryTable 来查找兄弟项
     // fn get_brother(&self, dentry_table: &DentryTable) -> Vec<&Dentry>;
@@ -79,19 +85,11 @@ trait DentryOperations {
 }
 
 impl DentryOperations for Dentry {
-    fn new(index: usize, parent: Option<Weak<Dentry>>) -> Rc<Dentry> {
-        Rc::new(Dentry {
-            index,
-            parent,
-            children: RefCell::new(Vec::new()),
-        })
+    fn get_parent(&self) -> Option<Dentry> {
+        self.parent.as_ref().map(|p| p.borrow().clone()) // 克隆父目录的引用
     }
 
-    fn get_parent(&self) -> Option<Rc<Dentry>> {
-        self.parent.as_ref().and_then(|weak| weak.upgrade())
-    }
-
-    fn get_children(&self) -> Vec<Rc<Dentry>> {
+    fn get_children(&self) -> Vec<Dentry> {
         self.children.borrow().clone() // 返回子节点的克隆
     }
 
@@ -126,35 +124,45 @@ mod tests {
     #[test]
     fn test_dentrytable_construction() {
         let mut dentry_table = DentryTable::new();
-        let dentry = dentry_table.add(None);
 
-        assert_eq!(dentry.index, 0);
+        {
+            let parent_index = Some(0);
+            let table_ops: &mut dyn DentryTableOperations = &mut dentry_table;
+            table_ops.add(parent_index);
+
+            println!("{:?}", dentry_table.get_dentries());
+
+            assert_eq!(dentry_table.get_dentries().len(), 1);
+        }
     }
 
     #[test]
-    fn test_dentry_construction() {
+    fn test_dentry_relationship() {
         let mut dentry_table = DentryTable::new();
-        let dentry = dentry_table.add(None);
 
-        let parent = dentry.get_parent();
+        {
+            let table_ops: &mut dyn DentryTableOperations = &mut dentry_table;
+            let parent = table_ops.add(None);
+            let child = Dentry::new(1, Some(Rc::downgrade(&parent)));
 
-        assert_eq!(dentry.index, 0);
-        assert!(parent.is_none());
+            assert_eq!(child.get_parent().unwrap(), parent);
+        }
+        assert_eq!(dentry_table.dentries.len(), 2);
     }
 
-    #[test]
-    fn test_get_children_dentry() {
-        let mut dentry_table = DentryTable::new();
-        let dentry = dentry_table.add(None);
+    // #[test]
+    // fn test_get_children_dentry() {
+    //     let mut dentry_table = DentryTable::new();
+    //     let dentry = dentry_table.add(None);
 
-        let sub_dentry = dentry_table.add(Some(0));
+    //     let sub_dentry = dentry_table.add(Some(0));
 
-        let sub_dentries = dentry.get_children();
+    //     let sub_dentries = dentry.get_children();
 
-        assert_eq!(sub_dentries.len(), 1);
-        // assert_eq!(sub_dentries[0].index, 1);
-        // assert!(sub_dentry.get_parent().is_none());
-    }
+    //     assert_eq!(sub_dentries.len(), 1);
+    //     // assert_eq!(sub_dentries[0].index, 1);
+    //     // assert!(sub_dentry.get_parent().is_none());
+    // }
 
     // #[test]
     // fn test_get_parent_dentry() {

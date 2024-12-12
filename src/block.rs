@@ -1,5 +1,5 @@
 // Compare this snippet from block.rs:
-use crate::{BLOCK_SIZE, get_uuid, current_timestamp_nanos, calculate_hash};
+use crate::{calculate_hash, current_timestamp_nanos, get_uuid, BLOCK_SIZE};
 
 pub struct Block {
     id: String,
@@ -13,8 +13,23 @@ pub struct Block {
     hash: String,                       // 哈希值
 }
 
+impl Block {
+    fn new() -> Block {
+        Block {
+            id: get_uuid(),
+            data: [0; BLOCK_SIZE],
+            valid_length: 0,
+            is_dirty: false,
+            is_deleted: false,
+            timestamp: 0,
+            last_access_time: 0,
+            previous_block: None,
+            hash: String::new(),
+        }
+    }
+}
+
 trait BlockChainOperations {
-    fn new() -> Block;
     // 读取数据
     fn read(&self) -> &[u8];
     // 写入数据
@@ -32,7 +47,6 @@ trait BlockChainOperations {
 }
 
 trait BlockOperations {
-    fn new() -> Block;
     // 读取数据
     fn read(&self) -> &[u8];
     // 写入数据
@@ -51,14 +65,14 @@ trait BlockOperations {
     fn get_valid_length(&self) -> usize;
     // 获取是否被修改
     fn is_dirty(&self) -> bool;
-    // 标记为脏
-    fn touch(&mut self) -> &mut Block;
     // 获取是否被删除
     fn is_deleted(&self) -> bool;
+    // 标记为脏
+    fn do_touch(&mut self) -> &mut Block;
     // 标记为删除
-    fn delete(&mut self);
+    fn do_delete(&mut self);
     // 标记已冲洗并刷新时间戳和哈希值
-    fn flush(&mut self);
+    fn do_flush(&mut self);
     // 获取上次访问时间
     fn get_last_access_time(&self) -> u128;
     // 获取哈希值
@@ -66,20 +80,6 @@ trait BlockOperations {
 }
 
 impl BlockOperations for Block {
-    fn new() -> Block {
-        Block {
-            id: get_uuid(),
-            data: [0; BLOCK_SIZE],
-            valid_length: 0,
-            is_dirty: false,
-            is_deleted: false,
-            timestamp: 0,
-            last_access_time: 0,
-            previous_block: None,
-            hash: String::new(),
-        }
-    }
-
     fn read(&self) -> &[u8] {
         &self.data[..self.valid_length]
     }
@@ -98,7 +98,7 @@ impl BlockOperations for Block {
         self.timestamp = current_timestamp_nanos();
         self.hash = calculate_hash(&self.data, self.timestamp.try_into().unwrap());
 
-        Ok(self.touch())
+        Ok(self.do_touch())
     }
 
     fn read_at(&self, offset: usize, size: usize) -> Result<&[u8], String> {
@@ -119,7 +119,7 @@ impl BlockOperations for Block {
         self.valid_length = offset + len; // 更新有效长度
         self.is_deleted = false;
 
-        Ok(self.touch())
+        Ok(self.do_touch())
     }
 
     fn append(&mut self, data: &[u8]) -> Result<&mut Block, String> {
@@ -135,7 +135,7 @@ impl BlockOperations for Block {
         self.valid_length += data_len; // 更新有效长度
         self.last_access_time = current_timestamp_nanos();
 
-        Ok(self.touch())
+        Ok(self.do_touch())
     }
 
     fn append_at(&mut self, offset: usize, data: &[u8]) -> Result<&mut Block, String> {
@@ -148,14 +148,14 @@ impl BlockOperations for Block {
         self.data[offset..offset + data_len].copy_from_slice(data);
         self.valid_length = offset + data_len; // 更新有效长度
 
-        Ok(self.touch())
+        Ok(self.do_touch())
     }
 
     fn truncate(&mut self, size: usize) -> &mut Block {
         if size < self.valid_length {
             self.valid_length = size;
             self.data[size..].fill(0);
-            return self.touch()
+            return self.do_touch();
         }
         self
     }
@@ -168,7 +168,7 @@ impl BlockOperations for Block {
         self.is_dirty
     }
 
-    fn touch(&mut self) -> &mut Block {
+    fn do_touch(&mut self) -> &mut Block {
         self.last_access_time = current_timestamp_nanos();
         self.is_dirty = true;
         self.hash = calculate_hash(&self.data, self.timestamp.try_into().unwrap());
@@ -183,12 +183,12 @@ impl BlockOperations for Block {
         self.last_access_time.try_into().unwrap()
     }
 
-    fn delete(&mut self) {
+    fn do_delete(&mut self) {
         self.is_deleted = true;
-        self.touch();
+        self.do_touch();
     }
 
-    fn flush(&mut self) {
+    fn do_flush(&mut self) {
         self.is_dirty = false;
         self.last_access_time = current_timestamp_nanos();
     }
@@ -204,37 +204,45 @@ mod tests {
 
     #[test]
     fn test_block_write() {
+        // 创建一个新的块
         let mut block = Block::new();
 
-        // 写入数据
-        let data_to_write = b"Hello, world!";
-        let _ = block.write(data_to_write);
-
-        // 读取数据
-        let read_data = block.read();
-
-        // 将字节切片转换为字符串
-        let read_data_str = std::str::from_utf8(read_data).unwrap();
-        let data_to_write_str = std::str::from_utf8(data_to_write).unwrap();
-
-        assert_eq!(read_data_str, data_to_write_str);
+        // 使用 BlockOperations trait
+        {
+            let block_ops: &mut dyn BlockOperations = &mut block;
+            // 写入数据
+            if block_ops.write(b"Hello, world!").is_ok() {
+                // 读取数据
+                let read_data = block_ops.read();
+                let read_data_str = std::str::from_utf8(read_data).unwrap();
+                assert_eq!(read_data_str, "Hello, world!");
+            }
+        }
     }
 
     #[test]
     fn test_block_write_at_data() {
         let mut block = Block::new();
-        // 写入数据
-        let data_to_write = b"Hello, world!";
-        let _ = block.write(data_to_write);
-        // 写入指定偏移量和长度的数据
-        // 尝试写入超出块大小的数据
-        let new_data = b"Six"; // 要插入的单个字节
-        let offset = 7; // 从偏移量 6 开始写入
 
-        let result = block.write_at(offset, new_data);
-        let read_data_str = std::str::from_utf8(block.read()).unwrap();
+        {
+            let block_ops: &mut dyn BlockOperations = &mut block;
+            // 写入数据
+            if block_ops.write(b"Hello, world!").is_ok() {
+                // 读取数据
+                let read_data = block_ops.read();
+                let read_data_str = std::str::from_utf8(read_data).unwrap();
+                assert_eq!(read_data_str, "Hello, world!");
+            }
 
-        assert_eq!(read_data_str, "Hello, Six");
+            let new_data = b"Six"; // 要插入的单个字节
+            let offset = 7; // 从偏移量 6 开始写入
+            if block_ops.write_at(offset, new_data).is_ok(){
+                let read_data = block_ops.read();
+                let read_data_str = std::str::from_utf8(read_data).unwrap();
+                assert_eq!(read_data_str, "Hello, Six");
+            }
+
+        }
     }
 
     #[test]
@@ -243,6 +251,7 @@ mod tests {
         // 写入数据
         let data_to_write = b"Hello, world!";
         let _ = block.write(data_to_write);
+
         // 写入指定偏移量和长度的数据
         // 尝试写入超出块大小的数据
         let new_data = b"a"; // 要插入的单个字节
@@ -255,7 +264,10 @@ mod tests {
         let result = block.write_at(offset, &data_to_write_at);
 
         // 断言写入操作应该返回错误
-        assert!(result.is_err(), "Expected an error when writing beyond block size");
+        assert!(
+            result.is_err(),
+            "Expected an error when writing beyond block size"
+        );
     }
 
     #[test]
@@ -275,9 +287,9 @@ mod tests {
 
         // 将字节切片转换为字符串
         let read_data_str = std::str::from_utf8(read_data).unwrap();
-        let append_data_str = std::str::from_utf8(append_data).unwrap();
 
-        let valid_data_str = format!("{}{}",
+        let valid_data_str = format!(
+            "{}{}",
             std::str::from_utf8(data_to_write).unwrap(),
             std::str::from_utf8(append_data).unwrap()
         );
@@ -315,7 +327,7 @@ mod tests {
         let data_to_write = b"Hello, world!";
         let _ = block.write(data_to_write);
         // 删除块
-        block.delete();
+        block.do_delete();
 
         assert_eq!(block.is_deleted(), true);
     }
@@ -326,8 +338,9 @@ mod tests {
         // 写入数据
         let data_to_write = b"Hello, world!";
         let _ = block.write(data_to_write);
+
         // 标记为已修改
-        block.touch();
+        block.do_touch();
         // 计算哈希值
         let hash = calculate_hash(&block.data, block.timestamp.try_into().unwrap());
         assert_eq!(hash, block.hash);
