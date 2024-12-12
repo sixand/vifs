@@ -1,5 +1,5 @@
 use crate::block::Block;
-use std::rc::Rc;
+use crate::dentry::Dentry;
 use std::collections::HashMap;
 use crate::{BLOCK_SIZE, get_uuid,current_timestamp_secs, calculate_hash};
 
@@ -26,7 +26,6 @@ struct Link {
 }
 
 struct Encryption {
-    is_encrypted: bool,
     encrypt_algorithm: String,
 }
 
@@ -45,129 +44,32 @@ struct Metadata {
     first_block_hash: String, // 第一个块的哈希值
 }
 
-struct Dentry {
-    // 存储目录树的节点引用
-    sub_dentry: Vec<Rc<Dentry>>,          // 子目录
-    parent_dentry: Option<*const Dentry>, // 父目录的指针
-    index: usize,                         // 在 DentryTable 中的位置
-}
 
-trait DentryOperations {
-    fn new(index: usize, parent: Option<*const Dentry>) -> Dentry;
-    fn get_sub_dentry(&self) -> &Vec<Rc<Dentry>>;
-    fn get_parent_dentry(&self) -> Option<&Dentry>;
-    fn get_brother_dentries(&self, dentry_table: &DentryTable) -> &Vec<Rc<Dentry>>;
-    fn get_location(&self, dentry_table: &DentryTable) -> Vec<&Dentry>;
-}
-
-struct DentryTable {
-    // 存储所有 Dentry 节点
-    dentries: Vec<Rc<Dentry>>, // 存储所有 Dentry 节点
-}
-
-trait DentryTableOperations {
-    fn add_dentry(&mut self, parent_index: Option<usize>) -> Rc<Dentry>;
-}
-
-struct BlockTable {
-    // 存储所有 Block 节点
-    blocks: Vec<Block>, // 存储所有 Block 节点
-}
-
-struct INode {
+struct Node {
     id: String,
     file_type: FileType,
     metadata: Metadata,
-    blocks: Box<BlockTable>,
+    block_indices: Box<Block>,
     dentry: Dentry,
     hash: String,
 }
 
-
-trait INodeOperations {
+trait NodeOperations {
     fn new(
         file_type: FileType,
         metadata: Metadata,
-        blocks: BlockTable,
+        block_indices: BlockTable,
         dentry: Rc<Dentry>,
     ) -> INode;
 
-    fn delete(&mut self) -> INode;
-    fn get_information(&self) -> &INode;
     fn set_permissions(&mut self, permissions: u16) -> INode;
     fn set_owner(&mut self, uid: u64, gid: u64) -> INode;
-    fn version_up(&mut self) -> INode;
+    fn get_blocks(&self) -> Vec<Block>;
     fn is_deleted(&self) -> bool;
-    fn get_block_indices(&self) -> Vec<Block>;
-    fn remove(&mut self, block: &Block) -> &INode;
+    fn do_version_up(&mut self) -> INode;
+    fn do_delete(&mut self) -> INode;
+    fn do_remove(&mut self, block: &Block) -> &INode;
 }
-
-// impl DentryOperations for Dentry {
-//     fn new(index: usize, parent: Option<*const Dentry>) -> Dentry {
-//         Dentry {
-//             sub_dentry: Vec::new(),
-//             parent_dentry: parent,
-//             index,
-//         }
-//     }
-
-//     fn get_sub_dentry(&self) -> &Vec<Rc<Dentry>> {
-//         // 直接返回子目录的引用
-//         &self.sub_dentry
-//     }
-
-//     fn get_parent_dentry(&self) -> Option<&Dentry> {
-//         // 返回父目录的引用
-//         if let Some(parent) = self.parent_dentry {
-//             unsafe { Some(&*parent) } // 解引用指针
-//         } else {
-//             None
-//         }
-//     }
-
-//     fn get_brother_dentries(&self, dentry_table: &DentryTable) -> &Vec<Rc<Dentry>> {
-//         if let Some(parent) = self.get_parent_dentry() {
-//             parent
-//                 .sub_dentry
-//                 .iter()
-//                 .filter(|&&sibling| sibling.index != self.index)
-//                 .clone() 
-//                 .collect()
-//         } else {
-//             Vec::new() // 如果没有父目录，则没有兄弟节点
-//         }
-//     }
-
-//     fn get_location(&self, dentry_table: &DentryTable) -> Vec<&Dentry> {
-//         let mut location = Vec::new();
-//         let mut current_dentry = self;
-//         while let Some(parent) = current_dentry.get_parent_dentry() {
-//             location.push(parent);
-//             current_dentry = parent;
-//         }
-//         location.reverse(); // 反转顺序，使路径从根目录到当前目录
-//         location
-//     }
-// }
-
-
-
-
-// impl DentryTableOperations for DentryTable {
-//     fn new() -> DentryTable {
-//         DentryTable {
-//             dentries: Vec::new(),
-//         }
-//     }
-
-//     fn add_dentry(&mut self, parent_index: Option<usize>) -> Rc<Dentry> {
-//         let index = self.dentries.len();
-//         let parent = parent_index.map(|i| &self.dentries[i] as *const Dentry);
-//         let new_dentry = Rc::new(Dentry::new(index, parent));
-//         self.dentries.push(new_dentry.clone());
-//         new_dentry // 返回新添加的 Dentry 的引用
-//     }
-// }
 
 
 // impl INodeOperations for INode {
@@ -248,79 +150,3 @@ trait INodeOperations {
 
 
 
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-//     #[test]
-//     fn test_dentry_construction() {
-//         let dentry_table = DentryTable::new();
-//         let dentry = dentry_table.add_dentry(None);
-
-//         assert_eq!(dentry.index, 0);
-//         assert_eq!(dentry.parent_dentry, None);
-//     }
-
-//     #[test]
-//     fn test_get_sub_dentry() {
-//         let dentry_table = DentryTable::new();
-//         let dentry = dentry_table.add_dentry(None);
-
-//         let sub_dentry = dentry_table.add_dentry(Some(0));
-
-//         let sub_dentries = dentry.get_sub_dentry();
-
-//         assert_eq!(sub_dentries.len(), 1);
-//         assert_eq!(sub_dentries[0].index, 1);
-//     }
-
-//     #[test]
-//     fn test_get_parent_dentry() {
-//         let dentry_table = DentryTable::new();
-//         let dentry = dentry_table.add_dentry(None);
-
-//         let sub_dentry = dentry_table.add_dentry(Some(0));
-//         let sub_sub_dentry = sub_dentry.add_dentry(Some(1));
-//         let parent_dentry = dentry.get_parent_dentry();
-
-//         assert_eq!(sub_dentry, sub_sub_dentry.get_parent_dentry());
-//         assert_eq!(dentry, sub_dentry.get_parent_dentry());
-//         assert_eq!(parent_dentry, None);
-//     }
-
-//     #[test]
-//     fn test_get_brother_dentries() {
-//         let dentry_table = DentryTable::new();
-
-//         let parent_dentry = dentry_table.add_dentry(None);
-//         let sub_dentry = dentry_table.add_dentry(parent_dentry.index);
-
-//         let dentry1 = sub_dentry.add_dentry(sub_dentry.index);
-//         let dentry2 = sub_dentry.add_dentry(sub_dentry.index);
-
-//         let brother_dentries = dentry1.get_brother_dentries(&dentry_table);
-
-//         assert_eq!(brother_dentries.len(), 1);
-//         assert_eq!(brother_dentries[0].index, dentry1.index);
-//     }
-
-//     #[test]
-//     fn test_get_location() {
-//         let dentry_table = DentryTable::new();
-//         let dentry1 = dentry_table.add_dentry(None);
-//         let dentry2 = dentry_table.add_dentry(dentry1.index);
-//         let dentry3 = dentry_table.add_dentry(dentry2.index);
-//         let dentry4 = dentry_table.add_dentry(dentry3.index);
-
-
-//         let location = dentry4.get_location(&dentry_table);
-
-//         // 检查路径是否正确
-//         assert_eq!(location.len(), 4);
-//         assert_eq!(location[0].index, dentry1.index);
-//         assert_eq!(location[1].index, dentry2.index);
-//         assert_eq!(location[2].index, dentry3.index);
-//         assert_eq!(location[3].index, dentry4.index);
-//     }
-// }

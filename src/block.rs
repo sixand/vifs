@@ -1,5 +1,4 @@
 // Compare this snippet from block.rs:
-use std::time::{SystemTime, UNIX_EPOCH};
 use crate::{BLOCK_SIZE, get_uuid, current_timestamp_nanos, calculate_hash};
 
 pub struct Block {
