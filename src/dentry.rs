@@ -1,6 +1,4 @@
-use std::{borrow::Borrow, cell::RefCell, collections::BTreeMap, rc::Rc};
-
-type ParentType = Rc<RefCell<Dentry>>;
+use std::collections::BTreeMap;
 
 // 定义 DentryTable 结构体
 #[derive(Debug, Clone)]
@@ -19,10 +17,6 @@ impl Dentry {
             parent,
             children: BTreeMap::new(),
         }
-    }
-
-    fn create_parent_type(&self) -> ParentType {
-        Rc::new(RefCell::new(self.clone()))
     }
 
     // 插入子目录
