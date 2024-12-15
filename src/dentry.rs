@@ -1,104 +1,84 @@
-const MAX_DEGREE: usize = 24; // 最大度数，即每个节点的最大子节点数量
+use std::{borrow::Borrow, cell::RefCell, collections::BTreeMap, rc::Rc};
 
-type Dentries = Option<Box<Dentry>>;
-type DentryChildren = Vec<Dentries>;
+type ParentType = Rc<RefCell<Dentry>>;
 
 // 定义 DentryTable 结构体
 #[derive(Debug, Clone)]
-struct DentryTable {
-    dentries: Dentries,  // 存储目录树的根节点
-    degree: usize,                 // 每个节点的最大关键字数量
-}
-
-#[derive(Debug, Clone)]
 struct Dentry {
-    // 存储目录树的节点引用
-    pathname: String,       // 存储路径名
-    children: DentryChildren,    // 存储子节点
-    is_leaf: bool,               // 是否为叶子节点
+    endpoint: String,  // 目录名或文件名
+    parent: Option<Box<Dentry>>,
+    children: BTreeMap<String, Dentry>,
 }
 
-impl Dentry  {
-    // 构造函数，创建一个新的 Dentry 节点
-    fn new(pathname: String, is_leaf: bool) -> Self {
+
+impl Dentry {
+    // 新目录
+    fn new(endpoint: &str, parent:Option<Box<Dentry>>) -> Self {
         Dentry {
-            pathname,
-            children: Vec::new(),
-            is_leaf,
+            endpoint: endpoint.to_string(),
+            parent,
+            children: BTreeMap::new(),
         }
     }
-}
 
-impl DentryTable {
-    // 构造函数，创建一个新的 DentryTable
-    fn new(degree: usize) -> Self {
-        DentryTable {
-            dentries: None,
-            degree,
-        }
+    fn create_parent_type(&self) -> ParentType {
+        Rc::new(RefCell::new(self.clone()))
     }
-}
 
-trait BPlusTree {
-    fn insert(&mut self, pathname: String) -> Result<(), String>;
-    fn get_absolute_path(&self, pathname: String) -> Option<String>;
-    fn get_path(&self, dentry: &DentryTable, pathname: &str, current_path: String) -> Option<String>;
-    fn search_dentry(&self, dentry: &Dentry, pathname: String) -> Option<&DentryTable>;
-    fn search(&self, pathname: String) -> Result<(), String>;
-    fn split_child(&mut self, parent: &mut Dentry, index: usize);
-    fn is_full(&self, dentry: &Dentry) -> bool;
-    fn insert_non_full(&mut self, dt: &mut DentryTable, pathname:String) -> Result<(), String>;
-}
+    // 插入子目录
+    fn do_add(&mut self, endpoint: &str) -> Result<Dentry, String> {
+        if self.children.contains_key(endpoint) {
+            return Err("Subdirectory already exists".to_string());
+        }
+        let child = Dentry::new(endpoint, Some(Box::new(self.clone())));
+        self.children.insert(endpoint.to_string(), child.clone());
 
-impl BPlusTree for DentryTable {
-    fn insert(&mut self, pathname: String) -> Result<(), String>   {
-        if self.dentries.is_none() {
-            // 如果根节点为空，创建一个新的根节点
-            let new_dentry = Dentry::new(pathname.clone(), true);
-            // 将新的根节点插入到树中
-            self.dentries = Some(Box::new(new_dentry));
-            return Ok(());
+        Ok(child)
+    }
+
+    // 删除子目录
+    fn do_remove(&mut self, endpoint: &str) -> bool {
+        self.children.remove(endpoint).is_some()
+    }
+
+    // 列出当前所有子目录
+    fn list(&self) -> Vec<&Dentry> {
+        self.children.values().collect()
+    }
+
+    // 获取父目录
+    fn get_parent(&self) -> Option<Box<Dentry>> {
+        self.parent.clone()  // 克隆 Rc 以增加引用计数
+    }
+    
+    // 获取绝对路径
+       fn get_abspath(&self) -> String {
+        let mut abspath = String::new();
+        let mut current = Some(self);
+
+        while let Some(dentry) = current {
+            abspath.insert_str(0, &format!("{}/", dentry.endpoint.to_string()));
+            current = dentry.parent.as_ref().map(|parent| &**parent);
         }
 
-        // 从根节点开始搜索插入位置
-        let mut current_dentry = self.dentries.as_mut().unwrap();
-
-        if !current_dentry.is_leaf {
-            // 如果当前节点不是叶子节点，则递归搜索插入位置
-            let mut i = 0;
-            while i < current_dentry.children.len() && current_dentry.children[i].as_ref().unwrap().pathname < pathname {
-                i += 1;
+        // 处理根目录的情况
+        if abspath.is_empty() {
+            return "/".to_string();
+        } else {
+            // 去掉最后一个多余的斜杠
+            if abspath.ends_with('/') {
+                abspath.pop();
             }
 
-        Ok(())
+            // 去掉开头的多余斜杠
+            if abspath.starts_with("//") {
+                abspath.remove(0);
+            }
+        }
+    
+        abspath
     }
 
-    fn get_absolute_path(&self, pathname: String) -> Option<String> {
-        unimplemented!()
-    }
-
-    fn get_path(&self, dentry: &DentryTable, pathname: &str, current_path: String) -> Option<String>{
-        unimplemented!()
-    }
-
-    fn search_dentry(&self, dentry: &Dentry, pathname: String) -> Option<&DentryTable>{
-        unimplemented!()
-    }
-    fn search(&self, pathname: String) -> Result<(), String> {
-        unimplemented!()
-    }
-
-    fn split_child(&mut self, parent: &mut Dentry, index: usize){
-        unimplemented!()
-    }
-
-    fn is_full(&self, dentry: &Dentry) -> bool{
-        unimplemented!()
-    }
-
-    fn insert_non_full(&mut self, dt: &mut DentryTable, pathname:String) -> Result<(), String>{
-        unimplemented!()
-    }
 }
 
 
@@ -107,12 +87,22 @@ mod tests {
 
     #[test]
     fn test_dentry_table() {
-        let mut dentry_table = DentryTable::new(MAX_DEGREE);
-        dentry_table.insert("a".to_string());
-        dentry_table.insert("b".to_string());
-        dentry_table.insert("c".to_string());
-        dentry_table.insert("d".to_string());
+        let mut root_dentry = Dentry::new("/", None);
 
-        assert_eq!(dentry_table.search("a".to_string()).is_ok(), true);
+        assert_eq!(root_dentry.get_abspath(), "/".to_string());
+
+        let dir1 = root_dentry.do_add("dir1");
+        let dir2 = dir1.expect("REASON").do_add("dir2");
+        assert_eq!(dir2.as_ref().unwrap().get_abspath(), "/dir1/dir2".to_string());
+
+        let dir3 = dir2.expect("REASON").do_add("dir3");
+        assert!(dir3.is_ok());
+
+        assert_eq!(dir3.as_ref().unwrap().get_abspath(), "/dir1/dir2/dir3".to_string());
+
+        let dir4 = dir3.expect("REASON").do_add("dir4.txt");
+
+        assert_eq!(dir4.as_ref().unwrap().get_abspath(), "/dir1/dir2/dir3/dir4.txt".to_string());
+        
     }
-}
+}   
