@@ -3,15 +3,14 @@ use std::collections::BTreeMap;
 // 定义 DentryTable 结构体
 #[derive(Debug, Clone)]
 struct Dentry {
-    endpoint: String,  // 目录名或文件名
+    endpoint: String, // 目录名或文件名
     parent: Option<Box<Dentry>>,
     children: BTreeMap<String, Dentry>,
 }
 
-
 impl Dentry {
     // 新目录
-    fn new(endpoint: &str, parent:Option<Box<Dentry>>) -> Self {
+    fn new(endpoint: &str, parent: Option<Box<Dentry>>) -> Self {
         Dentry {
             endpoint: endpoint.to_string(),
             parent,
@@ -42,11 +41,11 @@ impl Dentry {
 
     // 获取父目录
     fn get_parent(&self) -> Option<Box<Dentry>> {
-        self.parent.clone()  // 克隆 Rc 以增加引用计数
+        self.parent.clone()
     }
-    
+
     // 获取绝对路径
-       fn get_abspath(&self) -> String {
+    fn get_abspath(&self) -> String {
         let mut abspath = String::new();
         let mut current = Some(self);
 
@@ -69,12 +68,9 @@ impl Dentry {
                 abspath.remove(0);
             }
         }
-    
         abspath
     }
-
 }
-
 
 mod tests {
     use super::*;
@@ -87,16 +83,24 @@ mod tests {
 
         let dir1 = root_dentry.do_add("dir1");
         let dir2 = dir1.expect("REASON").do_add("dir2");
-        assert_eq!(dir2.as_ref().unwrap().get_abspath(), "/dir1/dir2".to_string());
+        assert_eq!(
+            dir2.as_ref().unwrap().get_abspath(),
+            "/dir1/dir2".to_string()
+        );
 
         let dir3 = dir2.expect("REASON").do_add("dir3");
         assert!(dir3.is_ok());
 
-        assert_eq!(dir3.as_ref().unwrap().get_abspath(), "/dir1/dir2/dir3".to_string());
+        assert_eq!(
+            dir3.as_ref().unwrap().get_abspath(),
+            "/dir1/dir2/dir3".to_string()
+        );
 
         let dir4 = dir3.expect("REASON").do_add("dir4.txt");
 
-        assert_eq!(dir4.as_ref().unwrap().get_abspath(), "/dir1/dir2/dir3/dir4.txt".to_string());
-        
+        assert_eq!(
+            dir4.as_ref().unwrap().get_abspath(),
+            "/dir1/dir2/dir3/dir4.txt".to_string()
+        );
     }
-}   
+}
