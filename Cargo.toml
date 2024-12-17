@@ -10,6 +10,9 @@ edition = "2021"
 # name = "vifs"
 # path = "src/include/lib.rs"
 
+[alias]
+t = "test -- --nocapture"
+
 [dependencies]
 sha2 = "0.10.8"
 uuid = { version = "1.0", features = ["v4"]}
