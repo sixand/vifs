@@ -4,15 +4,24 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
+// 定义 DentryWrapper 类型，包含 Arc<Mutex<Dentry>> 以简化线程安全操作
+type DentryGuard = Arc<Mutex<Dentry>>;
+
+// 定义 Children 类型，使用 HashSet 存储 DentryWrapper
+type Children = Mutex<HashSet<DentryWrapper>>;
+
+// 定义 WeakDentry 类型，简化 Weak<Mutex<Dentry>> 的使用
+type WeakDentry = Weak<Mutex<Dentry>>;
+
 #[derive(Debug)]
 struct Dentry {
     endpoint: String,
-    parent: Option<Weak<Mutex<Dentry>>>,
-    children: Mutex<HashSet<DentryWrapper>>,
+    parent: Option<WeakDentry>,
+    children: Children,
 }
 
 #[derive(Debug, Clone)]
-struct DentryWrapper(Arc<Mutex<Dentry>>);
+struct DentryWrapper(DentryGuard);
 
 impl PartialEq for DentryWrapper {
     fn eq(&self, other: &Self) -> bool {
@@ -32,7 +41,7 @@ impl Hash for DentryWrapper {
 }
 
 impl Dentry {
-    fn new(endpoint: &str, parent: Option<Arc<Mutex<Dentry>>>) -> Arc<Mutex<Dentry>> {
+    fn new(endpoint: &str, parent: Option<DentryGuard>) -> DentryGuard {
         let parent_weak = parent.as_ref().map(|p| Arc::downgrade(&p));
         let dentry = Dentry {
             endpoint: endpoint.to_string(),
@@ -41,12 +50,59 @@ impl Dentry {
         };
         Arc::new(Mutex::new(dentry))
     }
+
+    fn get_parent(&self) -> Option<WeakDentry> {
+        self.parent.clone()
+    }
+
+    fn get_children(&self) -> Children {
+        self.children.lock().unwrap().clone().into()
+    }
+
+    fn get_endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    fn get_children_count(&self) -> usize {
+        self.children.lock().unwrap().len()
+    }
+
+    fn remove_child(&mut self, endpoint: &str) -> Result<(), String> {
+        let mut children_lock = self.children.lock().unwrap();
+    
+        // 记录原始子元素数量
+        let original_count = children_lock.len();
+    
+        // 使用 retain 来保留符合条件的元素
+        children_lock.retain(|child| {
+            let child_lock = child.0.lock().unwrap();
+            if child_lock.endpoint == endpoint {
+                // 如果子目录不为空，返回 true，表示保留
+                if child_lock.get_children_count() > 0 {
+                    return true; // 保留不删除
+                }
+                // 返回 false，表示要删除这个子目录
+                false
+            } else {
+                // 返回 true，表示保留这个子目录
+                true
+            }
+        });
+    
+        // 检查是否有元素被删除
+        if original_count != children_lock.len() {
+            Ok(())
+        } else {
+            Err(format!("Child with endpoint '{}' not found or not empty.", endpoint))
+        }
+    }
+    
 }
 
 #[derive(Debug)]
 struct DentryTable {
-    root: Arc<Mutex<Dentry>>,
-    cursor: Weak<Mutex<Dentry>>,
+    root: DentryGuard,
+    cursor: WeakDentry,
 }
 
 impl DentryTable {
@@ -56,7 +112,7 @@ impl DentryTable {
         DentryTable { root, cursor }
     }
 
-    fn insert(&mut self, endpoint: &str) -> Arc<Mutex<Dentry>> {
+    fn insert(&mut self, endpoint: &str) -> DentryGuard {
         let parent_dentry = if let Some(cursor_arc) = self.cursor.upgrade() {
             Some(cursor_arc)
         } else {
