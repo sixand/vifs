@@ -1,63 +1,64 @@
-use std::{borrow::Borrow, rc::Rc, cell::RefCell};
+use std::{borrow::Borrow, cell::RefCell, rc::Rc};
+
+type DentryType = Rc<RefCell<Dentry>>;
 
 #[derive(Debug, Clone)]
 struct Dentry {
     endpoint: String,
-    parent: Option<Rc<Dentry>>, // 使用 Rc
-    children: Vec<Rc<Dentry>>,  // 使用 Rc
+    parent: Option<DentryType>, // 使用 Rc
+    children: Vec<DentryType>,  // 使用 Rc
 }
 
 #[derive(Debug)]
 struct DentryTable {
-    root: Rc<RefCell<Dentry>>,
+    root: DentryType,
     degree: usize,
     load_factor: f64,
     threshold: f64,
 }
 
 impl Dentry {
-    fn new(
-        endpoint: String,
-        parent: Option<Rc<Dentry>>,
-    ) -> Result<Dentry, &'static str> {
-        if endpoint.len() > 4096 {
-            return Err("endpoint length exceeds 4096 characters");
-        }
+    fn new(endpoint: String, parent: Option<DentryType>) -> Dentry {
         let new_dentry = Dentry {
             endpoint,
             parent,
             children: Vec::new(),
         };
 
-        Ok(new_dentry)
+        new_dentry
     }
 
-    fn insert(&mut self, endpoint: String) -> Result<Rc<Dentry>, &'static str> {
+    fn insert(&mut self, endpoint: String) -> Result<DentryType, &'static str> {
         println!("Inserting directory: {}", endpoint);
         println!("Current children count: {}", self.children.len());
 
         if endpoint.is_empty() {
             return Err("endpoint cannot be empty");
         }
-        if self.children.iter().any(|child| child.endpoint == endpoint) {
+        if self
+            .children
+            .iter()
+            .any(|child| child.try_borrow().unwrap().endpoint == endpoint)
+        {
             return Err("endpoint already exists");
         }
 
-        let parent = Some(Rc::new(self.clone())); // 这里需要确保 self 是 Rc<Dentry>
+        let parent = Rc::new(RefCell::new(self.clone())); // 这里需要确保 self 是 Rc<Dentry>
 
-        let new_node = Dentry::new(endpoint.clone(), parent)?;
-        self.children.push(new_node.clone().into());
-        Ok(Rc::new(new_node))
+        let new_dir = Rc::new(RefCell::new(Dentry::new(endpoint.clone(), Some(parent))));
+
+        self.children.push(new_dir.clone());
+        Ok(new_dir)
     }
 
     fn delete(&mut self, endpoint: &str) -> Result<(), &'static str> {
         if let Some(index) = self
             .children
             .iter()
-            .position(|child| child.endpoint == endpoint)
+            .position(|child| child.try_borrow().unwrap().endpoint == endpoint)
         {
             let child = &self.children[index];
-            if child.children.is_empty() {
+            if child.try_borrow().unwrap().children.is_empty() {
                 self.children.remove(index);
                 return Ok(());
             } else {
@@ -68,19 +69,24 @@ impl Dentry {
     }
 
     fn get_absolute_path(&self) -> String {
-        let mut path = String::new();
-        let mut current = self;
+        let mut path = String::from("/"); // 从根路径开始
+        let mut current: &Dentry = self;
 
-        // 先构建路径，最后再加上当前节点的 endpoint
-        while let Some(parent) = current.parent.as_ref() {
-            path = format!("/{}", current.endpoint) + &path; // 先加当前节点
-            current = parent.borrow(); // 使用 borrow() 来获取父目录
+        // 构建路径
+        loop {
+            path = format!("{}/{}", path, current.endpoint); // 将当前节点的 endpoint 加到路径的末尾
+            if let Some(parent) = &current.parent {
+                let parent_borrow = parent ; // 尝试借用父节点
+                current = &parent_borrow; // 更新 current 为父节点
+            } else {
+                break; // 如果没有父节点，即到达根节点，退出循环
+            }
         }
-        // path = format!("/{}", current.endpoint); // 加上根目录
+
         path
     }
 
-    fn search(&self, endpoint: String) -> Result<Vec<Rc<Dentry>>, &str> {
+    fn search(&self, endpoint: String) -> Result<Vec<DentryType>, &str> {
         let mut results = Vec::new();
         self.search_recursive(&self.children, endpoint, &mut results);
         Ok(results)
@@ -88,23 +94,22 @@ impl Dentry {
 
     fn search_recursive(
         &self,
-        children: &Vec<Rc<Dentry>>,
+        children: &Vec<DentryType>,
         endpoint: String,
-        results: &mut Vec<Rc<Dentry>>,
+        results: &mut Vec<DentryType>,
     ) {
         for child in children {
             if child.endpoint == endpoint {
                 results.push(child.clone());
             }
             self.search_recursive(&child.children, endpoint.clone(), results);
-        } 
+        }
     }
 }
 
-
 impl DentryTable {
     fn init_root() -> Rc<RefCell<Dentry>> {
-        let degree:usize = 2;
+        let degree: usize = 2;
         let load_factor = 0.75;
         let threshold = load_factor * degree as f64;
         let root = Dentry::new(String::from("/"), None).unwrap();
@@ -126,40 +131,46 @@ mod tests {
 
     #[test]
     fn test_new_dir() {
-        let mount = DentryTable::init_root();
-        let mut root_table = mount.borrow_mut();
-        
+        let mut mount = DentryTable::init_root();
+        let root_table = mount.get_mut();
+
         // 插入新目录并处理 Result
-        match root_table.get_mut().insert("dir1".to_string()) {
-            Ok(dir1) => {
-                // 验证根目录的 endpoint
-                assert_eq!(root_table.get_mut().endpoint, "/");
+        let result = root_table.insert("dir1".to_string()).unwrap();
 
-                // 搜索新插入的目录
-                let search_dir1 = root_table.borrow().search("dir1".to_string()).unwrap();
-                assert_eq!(search_dir1.len(), 1);
-                assert_eq!(search_dir1[0].endpoint, dir1.endpoint);
-                assert_eq!(search_dir1[0].get_absolute_path(), "/dir1");
-            }
-            Err(e) => {
-                panic!("Failed to insert directory: {}", e);
-            }
-        }
+        // 验证根目录的 endpoint
+        assert_eq!(result.endpoint, "/");
 
-  
+        // 搜索新插入的目录
+        let search_result = root_table.search("dir1".to_string()).unwrap();
 
+        // 验证搜索结果
+        assert_eq!(result.children.len(), 1);
 
+        assert_eq!(search_result[0].endpoint, result.endpoint);
+
+        assert_eq!(search_result[0].get_absolute_path(), "/dir1");
     }
 
     #[test]
     fn test_insert_existing_dir() {
         let mount = DentryTable::init_root();
-        let mut root_table = mount.borrow_mut();
+        let mut root_table = mount.clone(); // 克隆 Rc 以便后续使用
 
-        let _ = root_table.insert("dir1".to_string());
-        let dir1_again = root_table.insert("dir1".to_string());
+        {
+            let root = root_table.borrow_mut(); // 获取可变借用
+                                                // 第一次插入 "dir1"
+            let _ = root
+                .insert("dir1".to_string())
+                .expect("Failed to insert dir1");
+        }
 
-        assert!(dir1_again.is_err());
+        {
+            let root = root_table.borrow_mut(); // 再次借用
+            let dir1_again = root.get_mut().insert("dir1".to_string());
+
+            // 验证插入失败
+            assert!(dir1_again.is_err());
+        }
     }
 
     #[test]
@@ -221,7 +232,7 @@ mod tests {
     fn test_deep_directory_structure() {
         let mount = DentryTable::init_root();
         let mut root_table = mount.borrow_mut(); // 初始化根目录, 这里假设已经实现了 DentryTable 的初始化和 insert 方法
-    
+
         let mut current_dir = root_table.clone();
 
         for i in 0..=100 {
@@ -230,8 +241,7 @@ mod tests {
                 Ok(new_dir) => {
                     println!("New directory: {}", new_dir.get_absolute_path());
                     current_dir = Rc::new(new_dir.borrow_mut());
-                    ;
-                },
+                }
                 Err(_) => todo!(),
             }
         }
