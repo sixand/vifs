@@ -1,290 +1,265 @@
-use std::{borrow::Borrow, cell::RefCell, rc::Rc};
+use std::hash::{Hash, Hasher};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex, Weak},
+};
 
-type DentryType = Rc<RefCell<Dentry>>;
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Dentry {
     endpoint: String,
-    parent: Option<DentryType>, // 使用 Rc
-    children: Vec<DentryType>,  // 使用 Rc
+    parent: Option<Weak<Mutex<Dentry>>>,
+    children: Mutex<HashSet<DentryWrapper>>,
+}
+
+#[derive(Debug, Clone)]
+struct DentryWrapper(Arc<Mutex<Dentry>>);
+
+impl PartialEq for DentryWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        let self_lock = self.0.lock().unwrap();
+        let other_lock = other.0.lock().unwrap();
+        self_lock.endpoint == other_lock.endpoint
+    }
+}
+
+impl Eq for DentryWrapper {}
+
+impl Hash for DentryWrapper {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let lock = self.0.lock().unwrap();
+        lock.endpoint.hash(state);
+    }
+}
+
+impl Dentry {
+    fn new(endpoint: &str, parent: Option<Arc<Mutex<Dentry>>>) -> Arc<Mutex<Dentry>> {
+        let parent_weak = parent.as_ref().map(|p| Arc::downgrade(&p));
+        let dentry = Dentry {
+            endpoint: endpoint.to_string(),
+            parent: parent_weak,
+            children: Mutex::new(HashSet::new()),
+        };
+        Arc::new(Mutex::new(dentry))
+    }
 }
 
 #[derive(Debug)]
 struct DentryTable {
-    root: DentryType,
-    degree: usize,
-    load_factor: f64,
-    threshold: f64,
-}
-
-impl Dentry {
-    fn new(endpoint: String, parent: Option<DentryType>) -> Dentry {
-        let new_dentry = Dentry {
-            endpoint,
-            parent,
-            children: Vec::new(),
-        };
-
-        new_dentry
-    }
-
-    fn insert(&mut self, endpoint: String) -> Result<DentryType, &'static str> {
-        println!("Inserting directory: {}", endpoint);
-        println!("Current children count: {}", self.children.len());
-
-        if endpoint.is_empty() {
-            return Err("endpoint cannot be empty");
-        }
-        if self
-            .children
-            .iter()
-            .any(|child| child.try_borrow().unwrap().endpoint == endpoint)
-        {
-            return Err("endpoint already exists");
-        }
-
-        let parent = Rc::new(RefCell::new(self.clone())); // 这里需要确保 self 是 Rc<Dentry>
-
-        let new_dir = Rc::new(RefCell::new(Dentry::new(endpoint.clone(), Some(parent))));
-
-        self.children.push(new_dir.clone());
-        Ok(new_dir)
-    }
-
-    fn delete(&mut self, endpoint: &str) -> Result<(), &'static str> {
-        if let Some(index) = self
-            .children
-            .iter()
-            .position(|child| child.try_borrow().unwrap().endpoint == endpoint)
-        {
-            let child = &self.children[index];
-            if child.try_borrow().unwrap().children.is_empty() {
-                self.children.remove(index);
-                return Ok(());
-            } else {
-                return Err("endpoint has children, cannot delete");
-            }
-        }
-        Err("endpoint not found")
-    }
-
-    fn get_absolute_path(&self) -> String {
-        let mut path = String::from("/"); // 从根路径开始
-        let mut current: &Dentry = self;
-
-        // 构建路径
-        loop {
-            path = format!("{}/{}", path, current.endpoint); // 将当前节点的 endpoint 加到路径的末尾
-            if let Some(parent) = &current.parent {
-                let parent_borrow = parent ; // 尝试借用父节点
-                current = &parent_borrow; // 更新 current 为父节点
-            } else {
-                break; // 如果没有父节点，即到达根节点，退出循环
-            }
-        }
-
-        path
-    }
-
-    fn search(&self, endpoint: String) -> Result<Vec<DentryType>, &str> {
-        let mut results = Vec::new();
-        self.search_recursive(&self.children, endpoint, &mut results);
-        Ok(results)
-    }
-
-    fn search_recursive(
-        &self,
-        children: &Vec<DentryType>,
-        endpoint: String,
-        results: &mut Vec<DentryType>,
-    ) {
-        for child in children {
-            if child.endpoint == endpoint {
-                results.push(child.clone());
-            }
-            self.search_recursive(&child.children, endpoint.clone(), results);
-        }
-    }
+    root: Arc<Mutex<Dentry>>,
+    cursor: Weak<Mutex<Dentry>>,
 }
 
 impl DentryTable {
-    fn init_root() -> Rc<RefCell<Dentry>> {
-        let degree: usize = 2;
-        let load_factor = 0.75;
-        let threshold = load_factor * degree as f64;
-        let root = Dentry::new(String::from("/"), None).unwrap();
-        let root_table = DentryTable {
-            root: Rc::new(RefCell::new(root.clone())),
-            degree,
-            load_factor,
-            threshold,
+    fn init_root() -> Self {
+        let root = Dentry::new("/", None);
+        let cursor = Arc::downgrade(&root);
+        DentryTable { root, cursor }
+    }
+
+    fn insert(&mut self, endpoint: &str) -> Arc<Mutex<Dentry>> {
+        let parent_dentry = if let Some(cursor_arc) = self.cursor.upgrade() {
+            Some(cursor_arc)
+        } else {
+            Some(self.root.clone())
         };
-        root_table.root
+
+        let new_dentry = Dentry::new(endpoint, parent_dentry);
+        let new_wrapper = DentryWrapper(new_dentry.clone());
+        let root_lock = self.root.lock().unwrap();
+        let mut children_lock = root_lock.children.lock().unwrap();
+        children_lock.insert(new_wrapper);
+        new_dentry
+    }
+
+    fn change_cursor(&mut self, endpoint: &str) -> Result<(), String> {
+        let root_lock = self.root.lock().unwrap();
+        let children_lock = root_lock.children.lock().unwrap();
+        for child in children_lock.iter() {
+            let child_lock = child.0.lock().unwrap();
+            if child_lock.endpoint == endpoint {
+                self.cursor = Arc::downgrade(&child.0);
+                return Ok(());
+            }
+        }
+        Err(format!("No such endpoint: {}", endpoint))
+    }
+
+    fn remove(&mut self, endpoint: &str) -> Result<(), String> {
+        // 尝试从当前光标指向的目录中删除指定的目录项
+        let cursor_arc = self
+            .cursor
+            .upgrade()
+            .ok_or_else(|| format!("Cursor is invalid"))?;
+
+        let cursor_lock = cursor_arc.lock().unwrap();
+        let children_lock = cursor_lock.children.lock().unwrap();
+
+        // 查找要删除的子项
+        let child_option = children_lock.iter().find(|c| {
+            let child_lock = c.0.lock().unwrap();
+            child_lock.endpoint == endpoint
+        });
+
+        // 如果没有找到子项，返回错误
+        let child = match child_option {
+            Some(child) => child,
+            None => return Err(format!("No such endpoint: {}", endpoint)),
+        };
+
+        // 锁定子项以进行操作
+        let child_lock = child.0.lock().unwrap();
+        if child_lock.children.lock().unwrap().is_empty() {
+            // 重新锁定父目录以删除当前目录项
+            let mut children_lock = cursor_lock.children.lock().unwrap();
+            children_lock.remove(child);
+            return Ok(());
+        } else {
+            return Err(format!("Cannot remove non-empty directory: {}", endpoint));
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::BorrowMut;
-
     use super::*;
 
     #[test]
-    fn test_new_dir() {
-        let mut mount = DentryTable::init_root();
-        let root_table = mount.get_mut();
+    fn test_dentry_construction() {
+        let endpoint = "test_endpoint";
+        let dentry = Dentry::new(endpoint, None);
+        let dentry_lock = dentry.lock().unwrap();
 
-        // 插入新目录并处理 Result
-        let result = root_table.insert("dir1".to_string()).unwrap();
-
-        // 验证根目录的 endpoint
-        assert_eq!(result.endpoint, "/");
-
-        // 搜索新插入的目录
-        let search_result = root_table.search("dir1".to_string()).unwrap();
-
-        // 验证搜索结果
-        assert_eq!(result.children.len(), 1);
-
-        assert_eq!(search_result[0].endpoint, result.endpoint);
-
-        assert_eq!(search_result[0].get_absolute_path(), "/dir1");
+        assert_eq!(dentry_lock.endpoint, endpoint);
+        assert!(dentry_lock.parent.is_none());
     }
 
     #[test]
-    fn test_insert_existing_dir() {
-        let mount = DentryTable::init_root();
-        let mut root_table = mount.clone(); // 克隆 Rc 以便后续使用
+    fn test_dentry_partial_eq() {
+        let endpoint1 = "endpoint1";
+        let endpoint2 = "endpoint2";
 
-        {
-            let root = root_table.borrow_mut(); // 获取可变借用
-                                                // 第一次插入 "dir1"
-            let _ = root
-                .insert("dir1".to_string())
-                .expect("Failed to insert dir1");
-        }
+        let dentry1 = Dentry::new(endpoint1, None);
+        let dentry2 = Dentry::new(endpoint2, None);
 
-        {
-            let root = root_table.borrow_mut(); // 再次借用
-            let dir1_again = root.get_mut().insert("dir1".to_string());
+        let wrapper1 = DentryWrapper(dentry1.clone());
+        let wrapper2 = DentryWrapper(dentry2.clone());
 
-            // 验证插入失败
-            assert!(dir1_again.is_err());
-        }
+        assert_ne!(wrapper1, wrapper2);
     }
 
     #[test]
-    fn test_insert_and_search() {
-        let mount = DentryTable::init_root();
-        let mut root_table = mount.borrow_mut();
+    fn test_dentry_table_insert_subdir() {
+        let mut dentry_table = DentryTable::init_root();
+        let _ = dentry_table.insert("subdir");
 
-        let _ = root_table.insert("dir1".to_string());
-        let _ = root_table.insert("dir2".to_string());
-        let _ = root_table.insert("dir3".to_string());
-        let _ = root_table.insert("dir4".to_string());
-        let _ = root_table.insert("dir22".to_string());
+        assert!(dentry_table.change_cursor("subdir").is_ok());
+        assert!(dentry_table.change_cursor("nonexistent").is_err());
 
-        let search_dir1 = root_table.search("dir1".to_string()).unwrap();
-        let search_dir2 = root_table.search("dir2".to_string()).unwrap();
-        let search_dir3 = root_table.search("dir3".to_string()).unwrap();
-        let search_dir5 = root_table.search("dir5".to_string()).unwrap();
+        // Upgrade the cursor and check the endpoint
+        if let Some(cursor_arc) = dentry_table.cursor.upgrade() {
+            // Check the endpoint
+            let cursor_lock = cursor_arc.lock().unwrap();
+            assert_eq!(cursor_lock.endpoint, "subdir");
 
-        assert_eq!(search_dir3.len(), 1);
-
-        assert_eq!(search_dir3[0].endpoint, "dir3");
-
-        assert_eq!(search_dir1.len(), 1);
-
-        assert_eq!(search_dir1[0].endpoint, "dir1");
-
-        assert_eq!(search_dir2.len(), 2); // 应该返回两个匹配项
-
-        assert!(search_dir5.is_empty()); // dir3 不存在，结果应该为空
-    }
-
-    #[test]
-    fn test_delete_existing_dir() {
-        let mount = DentryTable::init_root();
-        let mut root_table = mount.borrow_mut();
-
-        let _ = root_table.get_mut().insert("dir1".to_string());
-        let _ = root_table.get_mut().insert("dir2".to_string());
-
-        let result = root_table.get_mut().delete("dir1");
-        let search_dir1 = root_table.as_ref().search("dir1".to_string());
-
-        assert!(result.is_ok());
-        assert!(search_dir1.is_ok());
-        assert!(search_dir1.unwrap().is_empty()); // dir1 已被删除，结果应该为空
-    }
-
-    #[test]
-    fn test_search_empty_table() {
-        let mount = DentryTable::init_root();
-        let root_table = mount.borrow_mut();
-
-        let result = root_table.search("dir1".to_string());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty()); // 空表应该返回空结果
-    }
-
-    #[test]
-    fn test_deep_directory_structure() {
-        let mount = DentryTable::init_root();
-        let mut root_table = mount.borrow_mut(); // 初始化根目录, 这里假设已经实现了 DentryTable 的初始化和 insert 方法
-
-        let mut current_dir = root_table.clone();
-
-        for i in 0..=100 {
-            let dir_name = format!("dir_{}", i);
-            match current_dir.borrow_mut().insert(dir_name) {
-                Ok(new_dir) => {
-                    println!("New directory: {}", new_dir.get_absolute_path());
-                    current_dir = Rc::new(new_dir.borrow_mut());
-                }
-                Err(_) => todo!(),
-            }
-        }
-    }
-
-    #[test]
-    fn test_create_directory() {
-        // 初始化 DentryTable
-        let mount = DentryTable::init_root();
-        let mut root_table = mount.borrow_mut();
-
-        // 创建目录 `/plasma/test/dir1/dir2`
-        let paths = vec!["plasma", "test", "dir1", "dir2"];
-        let mut current = root_table;
-
-        for path in paths {
-            let current_mut = root_table; // 使用 make_mut
-            match current_mut.insert(path.to_string()) {
-                Ok(new_dir) => {
-                    println!(
-                        "Current children count after insertion: {}",
-                        current_mut.children.len()
-                    );
-                    // 打印当前子目录的名称
-                    for child in &current_mut.children {
-                        println!("Child directory: {}", child.endpoint);
-                    }
-                    current = new_dir; // 更新当前目录为新创建的目录
-                }
-                Err(e) => {
-                    panic!("Failed to create directory '{}': {}", path, e);
+            // Check the parent
+            if let Some(parent) = &cursor_lock.parent {
+                // Upgrade the parent
+                if let Some(parent_arc) = parent.upgrade() {
+                    // Check the parent endpoint
+                    let parent_lock = parent_arc.lock().unwrap();
+                    assert_eq!(parent_lock.endpoint, "/");
+                } else {
+                    panic!("Parent should be valid.");
                 }
             }
+        } else {
+            panic!("Cursor should be valid.");
+        }
+    }
+
+    #[test]
+    fn test_dentry_table_into_insert() {
+        let mut dentry_table = DentryTable::init_root();
+        let _ = dentry_table.insert("subdir");
+
+        assert!(dentry_table.change_cursor("subdir").is_ok());
+
+        let _ = dentry_table.insert("subdir2");
+
+        assert!(dentry_table.change_cursor("subdir2").is_ok());
+        // Upgrade the cursor and check the endpoint
+        if let Some(cursor_arc) = dentry_table.cursor.upgrade() {
+            // Check the endpoint
+            let cursor_lock = cursor_arc.lock().unwrap();
+            assert_eq!(cursor_lock.endpoint, "subdir2");
+
+            // Check the parent
+            if let Some(parent) = &cursor_lock.parent {
+                // Upgrade the parent
+                if let Some(parent_arc) = parent.upgrade() {
+                    // Check the parent endpoint
+                    let parent_lock = parent_arc.lock().unwrap();
+                    assert_eq!(parent_lock.endpoint, "subdir");
+                } else {
+                    panic!("Parent should be valid.");
+                }
+            }
+        } else {
+            panic!("Cursor should be valid.");
         }
 
-        // 验证目录是否创建成功
-        let expected_paths = vec!["plasma", "test", "dir1", "dir2"];
-        let mut current = root_table;
+        let _ = dentry_table.insert("subdir3");
 
-        for path in expected_paths {
-            let found = current.children.iter().find(|child| child.endpoint == path);
-            assert!(found.is_some(), "Directory '{}' was not found", path);
-            current = found; // 更新当前目录为找到的子目录
+        assert!(dentry_table.change_cursor("subdir3").is_ok());
+        // Upgrade the cursor and check the endpoint
+        if let Some(cursor_arc) = dentry_table.cursor.upgrade() {
+            // Check the endpoint
+            let cursor_lock = cursor_arc.lock().unwrap();
+            assert_eq!(cursor_lock.endpoint, "subdir3");
+
+            // Check the parent
+            if let Some(parent) = &cursor_lock.parent {
+                // Upgrade the parent
+                if let Some(parent_arc) = parent.upgrade() {
+                    // Check the parent endpoint
+                    let parent_lock = parent_arc.lock().unwrap();
+                    assert_eq!(parent_lock.endpoint, "subdir2");
+                } else {
+                    panic!("Parent should be valid.");
+                }
+            }
+        } else {
+            panic!("Cursor should be valid.");
         }
+    }
+
+    #[test]
+    fn test_dentry_table_remove() {
+        let mut dentry_table = DentryTable::init_root();
+        let subdir1 = dentry_table.insert("subdir1");
+        let _ = dentry_table.insert("subdir2");
+
+        // 在 subdir1 中插入一个子目录
+        {
+            let subdir1_lock = subdir1.lock().unwrap();
+            let mut children_lock = subdir1_lock.children.lock().unwrap();
+            children_lock.insert(DentryWrapper(dentry_table.insert("subdir1_child")));
+        }
+
+        // 尝试删除 subdir1，应该返回错误，因为它不为空
+        assert!(dentry_table.remove("subdir1").is_err());
+
+        // 尝试删除 subdir2，应该成功
+        assert!(dentry_table.remove("subdir2").is_ok());
+
+        // 删除 subdir1_child
+        {
+            let subdir1_lock = subdir1.lock().unwrap();
+            let mut children_lock = subdir1_lock.children.lock().unwrap();
+            children_lock.remove(&DentryWrapper(dentry_table.insert("subdir1_child")));
+        }
+
+        // 现在可以删除 subdir1
+        assert!(dentry_table.remove("subdir1").is_ok());
     }
 }
