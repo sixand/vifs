@@ -47,6 +47,7 @@ struct Metadata {
 
 struct Node {
     id: String,
+    raw_id: usize,
     file_type: FileType,
     metadata: Metadata,
     block_indices: Box<Block>,
@@ -70,83 +71,3 @@ trait NodeOperations {
     fn do_delete(&mut self) -> INode;
     fn do_remove(&mut self, block: &Block) -> &INode;
 }
-
-
-// impl INodeOperations for INode {
-//     fn new(
-//         file_type: FileType,
-//         metadata: Metadata,
-//         blocks: BlockTable,
-//         dentry: Some(Dentry),
-//     ) -> INode {
-//         // 如果 dentry 为 None，则创建一个root的 Dentry 节点
-//         INode {
-//             id: get_uuid(),
-//             file_type,
-//             metadata,
-//             blocks,
-//             dentry,
-//         }
-//     }
-
-//     fn delete(&mut self) -> &INode {
-//         // 实现删除逻辑
-//         if let Some(ref mut metadata) = self.metadata {
-//             metadata.is_deleted = true;
-//             metadata.links_count -= 1;
-//             metadata.modified_at = current_timestamp_secs();
-//             metadata.version += 1;
-//             metadata.size = 0;
-//         }
-//         self
-//     }
-
-//     fn get_information(&self) -> &INode {
-//         // 返回节点的引用
-//         self
-//     }
-
-//     fn set_permissions(&mut self, permissions: u16) {
-//         // 实现设置权限的逻辑
-//         if let Some(ref mut metadata) = self.metadata {
-//             metadata.permissions = permissions;
-//         }
-//     }
-
-//     fn set_owner(&mut self, uid: u64, gid: u64) {
-//         // 实现设置所有者的逻辑
-//         if let Some(ref mut metadata) = self.metadata {
-//             metadata.uid = uid;
-//             metadata.gid = gid;
-//         }
-//     }
-
-//     fn version_up(&mut self) {
-//         // 实现版本号增加的逻辑
-//         if let Some(ref mut metadata) = self.metadata {
-//             metadata.version += 1;
-//         }
-//     }
-
-//     fn is_deleted(&self) -> bool {
-//         // 实现判断是否被删除的逻辑
-//         self.metadata.as_ref().map_or(false, |m| m.is_deleted)
-//     }
-
-//     fn get_block_indices(&self) -> Vec<Block> {
-//         // 实现获取块索引的逻辑
-//         self.blocks.blocks.clone() // 返回块的克隆
-//     }
-
-//     fn remove(&mut self, block: &Block) -> &INode {
-//         // 实现移除块的逻辑
-//         self.blocks.map(|mut block| {
-//             block.is_deleted = true;
-//             block.is_dirty = true;
-//         });
-//         self
-//     }
-// }
-
-
-
