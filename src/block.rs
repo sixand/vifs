@@ -1,3 +1,5 @@
+use md5::Digest;
+
 // Compare this snippet from block.rs:
 use crate::{calculate_hash, current_timestamp_nanos, get_uuid, BLOCK_SIZE};
 
@@ -14,28 +16,31 @@ pub struct Block {
 }
 
 impl Block {
-    fn new() -> Block {
+    pub fn new() -> Self {
         Block {
             id: get_uuid(),
             data: [0; BLOCK_SIZE],
             valid_length: 0,
             is_dirty: false,
             is_deleted: false,
-            timestamp: 0,
-            last_access_time: 0,
+            timestamp: current_timestamp_nanos(),
+            last_access_time: current_timestamp_nanos(),
             previous_block: None,
             hash: String::new(),
         }
     }
+    
 }
 
 trait BlockChainOperations {
     // 读取数据
     fn read(&self) -> &[u8];
+    // 读取指定偏移量和长度的数据
+    fn read_at(&self, offset: usize, size: usize) -> Result<&[u8], String>;
     // 写入数据
     fn write(&mut self, data: &[u8]) -> Result<&mut Block, String>;
     // 读取指定偏移量和长度的数据
-    fn read_at(&self, offset: usize, size: usize) -> Result<&[u8], String>;
+    fn write_at(&mut self, offset: usize, data: &[u8]) -> Result<&mut Block, String>;
     // 获取有效数据长度
     fn get_valid_length(&self) -> usize;
     // 获取哈希值
@@ -91,12 +96,12 @@ impl BlockOperations for Block {
         if len > BLOCK_SIZE {
             return Err("data is too large".to_string());
         }
-
+        
         // 将提供的数据复制到块的 data 数组中
+        self.id = get_uuid();
         self.data[..len].copy_from_slice(data);
         self.valid_length = len;
         self.timestamp = current_timestamp_nanos();
-        self.hash = calculate_hash(&self.data, self.timestamp.try_into().unwrap());
 
         Ok(self.do_touch())
     }
@@ -117,7 +122,6 @@ impl BlockOperations for Block {
         // 将提供的数据复制到块的 data 数组中
         self.data[offset..offset + len].copy_from_slice(data);
         self.valid_length = offset + len; // 更新有效长度
-        self.is_deleted = false;
 
         Ok(self.do_touch())
     }
@@ -155,6 +159,7 @@ impl BlockOperations for Block {
         if size < self.valid_length {
             self.valid_length = size;
             self.data[size..].fill(0);
+            
             return self.do_touch();
         }
         self

@@ -51,3 +51,7 @@ mod block;
 // mod node;
 mod dentry;
 mod tests;
+mod inode;
+mod filesystem;
+mod storage;
+mod metadata;
