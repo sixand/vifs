@@ -1,13 +1,17 @@
 use crate::inode::Inode;
 
 pub(crate) struct Dentry {
-    endpoint: String,
-    parent: Option<Box<Dentry>>,
-    inode: Box<Inode>,
+    pub(crate) endpoint: String,
+    pub(crate) parent: Option<Box<Dentry>>,
+    pub(crate) inode: Box<Inode>,
 }
 
-trait DentryOptions {
-    fn get_endpoint(&self) -> &String;
-    fn get_parent(&self) -> &Option<Box<Dentry>>;
-    fn get_inode(&self) -> &Box<Inode> ;
+impl Dentry {
+    pub(crate) fn new(endpoint: String, parent: Option<Box<Dentry>>, inode: Box<Inode>) -> Self {
+        Self {
+            endpoint,
+            parent,
+            inode,
+        }
+    }
 }

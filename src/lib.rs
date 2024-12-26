@@ -47,11 +47,13 @@ pub fn calculate_hash(data: &[u8], timestamp: u64) -> String {
     format!("{:x}", result)
 }
 
-mod block;
-// mod node;
-mod dentry;
 mod tests;
-mod inode;
 mod filesystem;
 mod storage;
 mod metadata;
+mod block;
+mod dentry;
+mod inode;
+
+mod abstracts;
+mod implementation;

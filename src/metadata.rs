@@ -1,4 +1,4 @@
-use std::process::id;
+use crate::current_timestamp_secs;
 
 pub(crate) enum FileType {
     File, // 文件
@@ -21,7 +21,25 @@ pub(crate) struct Metadata {
     pub(crate) first_block_hash: String, // 第一个块的哈希值
 }
 
-enum Premissions {
+impl Metadata {
+    pub(crate) fn new(file_type: FileType) -> Self {
+        Self {
+            file_type,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            premissions: Permissions::default_file_permissions(),
+            links_count: 0,
+            create_at: current_timestamp_secs(),
+            modified_at: current_timestamp_secs(),
+            version: 0,
+            is_delete: false,
+            first_block_hash: String::new(),
+        }
+    }
+}
+
+pub(crate) enum Permissions {
     GroupRead = 0o400,
     GroupWrite = 0o200,
     GroupExecute = 0o100,
@@ -33,24 +51,28 @@ enum Premissions {
     OtherExecute = 0o1,
 }
 
-impl Metadata {
-    pub(crate) fn new(file_type: FileType) -> Self {
-        Metadata {
-            file_type,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            premissions: 0,
-            links_count: 0,
-            create_at: current_timestamp_secs(),
-            modified_at: current_timestamp_secs(),
-            version: 0,
-            is_delete: false,
-            first_block_hash: String::new(),
-        }
+impl Permissions {
+    pub(crate) fn default_user_permissions() -> u16 {
+        (Self::UserRead as u16) | (Self::UserWrite as u16) | (Self::UserExecute as u16)
     }
 
-    pub(crate) fn create_file(&mut self) {
-        self.premissions = permissions;
+    pub(crate) fn default_group_permissions() -> u16 {
+        (Self::GroupRead as u16) | (Self::GroupWrite as u16) | (Self::GroupExecute as u16) | (Self::OtherRead as u16) | (Self::OtherExecute as u16)
+    }
+
+    pub(crate) fn default_other_permissions() -> u16 {
+        (Self::OtherRead as u16) | (Self::OtherWrite as u16) | (Self::OtherExecute as u16)
+    }
+
+    pub(crate) fn default_file_permissions() -> u16 {
+        Self::default_user_permissions() | Self::default_group_permissions() | Self::default_other_permissions()
+    }
+
+    pub(crate) fn other_cant_write() -> u16 {
+        (Self::OtherRead as u16) | (Self::OtherExecute as u16)
+    }
+
+    pub(crate) fn group_cant_write() -> u16 {
+        (Self::GroupRead as u16) | (Self::GroupExecute as u16)
     }
 }
