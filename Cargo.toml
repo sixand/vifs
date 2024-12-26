@@ -6,12 +6,12 @@ name = "vifs"
 version = "0.1.0"
 edition = "2021"
 
-# [lib]
-# name = "vifs"
-# path = "src/include/lib.rs"
-
 [alias]
 t = "test -- --nocapture"
+
+[[bin]]
+name = "fsd"
+path = "src/bin/fsd.rs"
 
 [dependencies]
 sha2 = "0.10.8"

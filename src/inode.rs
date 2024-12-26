@@ -3,6 +3,7 @@ use crate::block::Block;
 
 type BlockIndices = HashMap<usize, Block>;
 
+#[derive(Clone)]
 pub(crate) struct Inode {
     id: String,
     block_indices: BlockIndices,

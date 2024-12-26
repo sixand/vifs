@@ -1,96 +1,91 @@
-// use crate::block::Block;
-// use crate::dentry::Dentry;
-// use crate::filesystem::Filesystem;
-// use crate::inode::Inode;
-// use crate::metadata::{FileType, Metadata, Permissions};
-// use crate::storage::Storage;
+use crate::filesystem::Filesystem;
+use crate::storage::Storage;
+use crate::abstracts::ServiceTrait;
+use std::{
+    env,
+    fs::{self, File},
+    path::{self, PathBuf},
+};
 
-// use crate::abstracts::{ConnectorStorage, FileOprations};
+pub struct PhysicalService;
+pub struct PhysicalFs;
 
-// use std::path::PathBuf;
-// use std::{env, fs};
+const WORKDIR: &str = "./";
 
-// pub struct PhysicalLayer {
-//     filesystem: Filesystem,
-//     storage: Storage,
-//     root: Dentry,
-// }
+impl ServiceTrait for PhysicalService {
+    fn connect(&self) -> Result<(), &str> {
+        let work_dir = PathBuf::from(WORKDIR);
 
-// impl ConnectorStorage for PhysicalLayer {
-//     fn mount(&mut self, path: &str) {
-//         let workspace = PathBuf::from(path);
-//         match env::set_current_dir(&workspace) {
-//             Ok(_) => {
-//                 if !workspace.exists() {
-//                     if let Err(e) = fs::create_dir_all(&workspace) {
-//                         println!("Failed to create directory: {}", e);
-//                     }
-//                 }
-//                 PhysicalLayer {
-//                     storage: Storage::new(workspace.clone()),
-//                     root: Dentry::new(
-//                         String::from("root"),
-//                         None,
-//                         Box::new(Inode::new(String::from("root"))),
-//                     ),
-//                 };
-//                 println!("Mounted at: {}", workspace.display());
-//             }
-//             Err(e) => {
-//                 println!("Failed to mount: {}", e);
-//             }
-//         }
-//     }
-// }
+        if !fs::exists(work_dir.clone()).unwrap() {
+            fs::create_dir(work_dir).unwrap();
+        }
+        env::current_dir().unwrap();
+        Ok(())
+    }
 
-// impl FileOprations<fs::File, Block, Dentry, Metadata> for PhysicalLayer {
-//     fn create(&mut self, path: &str, file_type: FileType) -> Block {
-//         if file_type == FileType::File {
-//             let mut current = &mut self.root;
-//             let first_block = Block::new();
-//         }
+    fn get(&self, hash: &str) -> Vec<u8> {
+        if fs::exists(hash).unwrap() {
+            fs::read(hash).unwrap()
+        } else {
+            vec![]
+        }
+    }
 
-//         match file_type {
-//             FileType::File => {
-//                 let mut current = &mut self.root;
-//                 let mut inode = Inode::new(String::from(path));
-//                 let mut matedata = Metadata::new(FileType::File);
-//                 let mut dentry = Dentry {
-//                     endpoint: String::from(path),
-//                     parent: current,
-//                     inode: Box::new(Inode::new(String::from(path))),
-//                 };
-//             }
-//             FileType::Directory => {
-//                 let mut current = &mut self.root;
-//             }
-//     }
+    fn put(&self, hash: &str, data: &[u8]) -> Result<(), &str> {
+        if fs::exists(hash).unwrap() {
+            let md = fs::metadata(path::Path::new(hash)).unwrap();
+            if md.is_file() {
+                fs::write(hash, data).expect_err("文件写入失败");
+                Ok(())
+            } else {
+                Err("对象不可读写")
+            }
+        } else {
+            Err("文件不存在")
+        }
+    }
 
-//     fn read(&mut self, index: usize) -> Dentry {
-//         todo!()
-//     }
+    fn delete(&self, hash: &str) {
+        let _ = hash;
+        unimplemented!()
+    }
 
-//     fn write(&mut self, index: usize, data: D) {
-//         todo!()
-//     }
+    fn list(&self) -> Vec<String> {
+        fs::read_dir(WORKDIR)
+            .unwrap()
+            .map(|res| res.unwrap().path().display().to_string())
+            .collect()
+    }
+}
 
-//     fn delete(&mut self) {
-//         todo!()
-//     }
+impl PhysicalFs {
+    pub fn new() -> Filesystem<PhysicalService> {
+        Filesystem::new(Storage {
+            service: PhysicalService,
+        })
+    }
 
-//     fn open(&mut self) -> F {
-//         todo!()
-//     }
+    pub fn flush(&self) {
+        unimplemented!()
+    }
 
-//     fn rename(&mut self, new_name: &str) {
-//         todo!()
-//     }
+    pub fn sync(&self) {
+        unimplemented!()
+    }
 
-//     fn cat(&self) -> B {
-//         todo!()
-//     }
+    pub fn close(&self) {
+        unimplemented!()
+    }
 
-//     fn stat(&self) -> S {
-//         todo!()
-//     }
-// }
+    pub fn open(&self) {
+        unimplemented!()
+    }
+
+    pub fn write(&self, hash: &str) -> Vec<u8> {
+        unimplemented!()
+    }
+
+    pub fn read(&self, hash: &str, data: &[u8]) -> Result<(), &str> {
+        unimplemented!()
+    }
+}

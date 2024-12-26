@@ -1,5 +1,6 @@
 use crate::inode::Inode;
 
+#[derive(Clone)]
 pub(crate) struct Dentry {
     pub(crate) endpoint: String,
     pub(crate) parent: Option<Box<Dentry>>,
@@ -13,5 +14,9 @@ impl Dentry {
             parent,
             inode,
         }
+    }
+
+    pub(crate) fn is_dir(&self) -> bool {
+        true
     }
 }

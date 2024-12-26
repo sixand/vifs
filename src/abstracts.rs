@@ -1,8 +1,20 @@
-pub trait FileOprations<S, F, D, B> {
+use crate::{dentry::Dentry, storage::Storage};
+
+pub trait DentryTrait {}
+
+pub trait InodeTrait {}
+
+pub trait MetadataTrait {}
+
+pub trait BlockTrait {}
+
+pub trait FileTrait {}
+
+pub trait FileOperations<B, D, F, S, E> {
     fn read(&mut self, index: usize) -> B;
-    fn write(&mut self, index: usize, data: D);
+    fn write(&mut self, fd: F, data: Vec<u8>);
     fn delete(&mut self);
-    fn create(&mut self);
+    fn create(&mut self, filename: &str);
     fn open(&mut self) -> F;
     fn rename(&mut self, new_name: &str);
     fn cat(&self) -> B;
@@ -13,7 +25,7 @@ pub trait DirectoryOprations<D> {
     fn list(&self) -> Vec<D>;
     fn create(&mut self, name: &str);
     fn remove(&mut self);
-    fn pwd(&self) -> String;
+    fn change(&self) -> String;
 }
 
 pub trait BlockReadWrite {
@@ -31,18 +43,19 @@ pub trait BlockAllocator<T> {
     fn is_allocated(&self, index: usize) -> bool;
 }
 
-pub trait ConnectorStorage<D, T> {
-    // TODO: 连接存储层，如挂载、创建、删除等操作
-    fn mount(&mut self, root: D, storage: T);
-    fn create(&mut self, name: &str, size: usize);
-    fn delete(&mut self, name: &str);
-    fn flush(&mut self);
+// TODO: 存储连接接口,连接存储层，如挂载、创建、删除等操作
+pub trait ConnectorStorage<'a, D, S, T> {
+    fn mount(&'a mut self, root: Dentry, storage: Storage<T>) -> &'a Self;
+    fn init(&mut self);
 }
 
-impl dyn ConnectorStorage<Dentry, Storage> {
-    fn mount(&mut self, root: Dentry, storage: Storage) {
-        // 挂载存储层
-    }
+// 服务接口
+pub trait ServiceTrait {
+    fn put(&self, hash: &str, data: &[u8]) -> Result<(), &str>;
+    fn get(&self, hash: &str) -> Vec<u8>;
+    fn delete(&self, hash: &str);
+    fn list(&self) -> Vec<String>;
+    fn connect(&self) -> Result<(), &str>;
 }
 
 pub trait Finder {
@@ -52,7 +65,7 @@ pub trait Finder {
 trait DentryOptions<D, I> {
     fn get_endpoint(&self) -> &String;
     fn get_parent(&self) -> &Option<Box<D>>;
-    fn get_inode(&self) -> &Box<I> ;
+    fn get_inode(&self) -> &Box<I>;
 }
 
 trait NodeOperations<I, B> {

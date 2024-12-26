@@ -11,6 +11,24 @@ pub struct Superblock {
     block_map: HashMap<usize, Box<Block>>,        // 块映射
 }
 
+impl Superblock {
+    pub(crate) fn new() -> Self {
+        Self {
+            total_blocks: 0,
+            free_blocks: Vec::new(),
+            allocated_blocks: HashMap::new(),
+            block_map: HashMap::new(),
+        }
+    }
+    pub(crate) fn init(&mut self, total_blocks: usize) {
+        self.total_blocks = total_blocks;
+        for _i in 0..total_blocks {
+            let block = Box::new(Block::new());
+            self.free_blocks.push(block);
+        }
+    }
+}
+
 struct IdGenerator {
     last_timestamp: Mutex<u64>,
     sequence: Mutex<u64>,
@@ -55,6 +73,7 @@ impl IdGenerator {
     }
 }
 
+#[derive(Clone)]
 pub struct Block {
     id: u64,
     index: usize,             // 块索引,用于标识块的位置，方便进行块的查找和管理
