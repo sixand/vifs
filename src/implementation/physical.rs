@@ -1,25 +1,40 @@
+use crate::abstracts::ServiceTrait;
 use crate::filesystem::Filesystem;
 use crate::storage::Storage;
-use crate::abstracts::ServiceTrait;
 use std::{
     env,
     fs::{self, File},
     path::{self, PathBuf},
 };
 
-pub struct PhysicalService;
-pub struct PhysicalFs;
+pub struct PhysicalService {
+    // 服务端地址
+    endpoint: String,
+    root_index: Option<u64>,
+}
 
 const WORKDIR: &str = "./";
 
 impl ServiceTrait for PhysicalService {
-    fn connect(&self) -> Result<(), &str> {
+    fn connect(&mut self) -> Result<(), &str> {
         let work_dir = PathBuf::from(WORKDIR);
 
         if !fs::exists(work_dir.clone()).unwrap() {
-            fs::create_dir(work_dir).unwrap();
+            fs::create_dir(work_dir.clone()).unwrap();
         }
         env::current_dir().unwrap();
+        #[cfg(target_os = "linux")]
+        {
+            let nodeid = fs::metadata(WORKDIR)?.ino();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::fs::MetadataExt;
+            self.root_index = fs::metadata(WORKDIR).unwrap().file_index();
+            self.endpoint = work_dir.clone().display().to_string();
+        }
+        #[cfg(target_os = "macos")]
+        {}
         Ok(())
     }
 
@@ -58,11 +73,20 @@ impl ServiceTrait for PhysicalService {
     }
 }
 
+pub struct PhysicalFs;
+
 impl PhysicalFs {
     pub fn new() -> Filesystem<PhysicalService> {
-        Filesystem::new(Storage {
-            service: PhysicalService,
-        })
+        let mut service = PhysicalService {
+            endpoint: String::from(""),
+            root_index: None,
+        };
+
+        if service.connect().is_ok() {
+            Filesystem::new(Storage { service })
+        } else {
+            panic!("连接失败")
+        }
     }
 
     pub fn flush(&self) {

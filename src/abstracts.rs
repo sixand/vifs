@@ -1,16 +1,16 @@
 use crate::{dentry::Dentry, storage::Storage};
 
-pub trait DentryTrait {}
+// pub trait DentryTrait {}
 
-pub trait InodeTrait {}
+// pub trait InodeTrait {}
 
-pub trait MetadataTrait {}
+// pub trait MetadataTrait {}
 
-pub trait BlockTrait {}
+// pub trait BlockTrait {}
 
-pub trait FileTrait {}
+// pub trait FileTrait {}
 
-pub trait FileOperations<B, D, F, S, E> {
+pub trait FileOperations<B, D, F, S> {
     fn read(&mut self, index: usize) -> B;
     fn write(&mut self, fd: F, data: Vec<u8>);
     fn delete(&mut self);
@@ -55,7 +55,7 @@ pub trait ServiceTrait {
     fn get(&self, hash: &str) -> Vec<u8>;
     fn delete(&self, hash: &str);
     fn list(&self) -> Vec<String>;
-    fn connect(&self) -> Result<(), &str>;
+    fn connect(&mut self) -> Result<(), &str>;
 }
 
 pub trait Finder {
