@@ -1,11 +1,10 @@
+#![cfg(target_os = "windows")]
 #![feature(windows_by_handle)]
-
-
 
 use uuid::Uuid;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::error::Error;
+// use crate::error::Error;
 
 pub const BLOCK_SIZE: usize = 512; // 块大小
 pub const MAX_FILES: usize = 1024; // 文件夹最大文件数
@@ -63,4 +62,4 @@ pub mod error;
 mod abstracts;
 pub mod implementation;
 
-pub type Result<T> = std::result::Result<T, Error>;
+// pub type Result<T> = std::result::Result<T, Error>;

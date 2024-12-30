@@ -1,14 +1,19 @@
-pub trait DentryOp {
-    fn dentry_add();
-}
-
+use crate::inode::Inode;
 use std::{
     borrow::BorrowMut,
     cell::{RefCell, RefMut},
     rc::Rc,
 };
 
-use crate::inode::Inode;
+pub trait DentryOp {
+    fn dentry_add();
+    fn dentry_delete();
+    fn dentry_find();
+    fn dentry_list();
+    fn dentry_parent();
+    fn dentry_children();
+}
+
 
 struct DentrysTable {
     tables: Vec<Dentry>,
